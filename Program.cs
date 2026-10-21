@@ -10,8 +10,8 @@ using System.Windows.Forms;
 using Microsoft.Win32;
 
 [assembly: AssemblyTitle("SnapLite")]
-[assembly: AssemblyDescription("Лёгкий инструмент для локальных скриншотов")]
-[assembly: AssemblyVersion("1.1.0.0")]
+[assembly: AssemblyDescription("Lightweight local screenshot tool")]
+[assembly: AssemblyVersion("1.2.0.0")]
 namespace SnapLite
 {
     internal static class Program
@@ -20,7 +20,7 @@ namespace SnapLite
         {
             Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
             Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
-            Application.ThreadException+=delegate(object s,ThreadExceptionEventArgs e){MessageBox.Show(e.Exception.Message,"SnapLite — ошибка",MessageBoxButtons.OK,MessageBoxIcon.Error);};
+            Application.ThreadException+=delegate(object s,ThreadExceptionEventArgs e){MessageBox.Show(e.Exception.Message,Loc.T("SnapLite — ошибка"),MessageBoxButtons.OK,MessageBoxIcon.Error);};
             int self=Array.IndexOf(args,"--self-test");
             if(self>=0){Tests.Run(self+1<args.Length?args[self+1]:Path.Combine(Path.GetTempPath(),"SnapLite-tests.txt"));return;}
             int profile=Array.IndexOf(args,"--test-profile");if(profile>=0&&profile+1<args.Length)Settings.ProfileDirectory=Path.GetFullPath(args[profile+1]);
@@ -30,7 +30,7 @@ namespace SnapLite
             {
                 if(!created){openSignal.Set();return;}
                 try{using(var ctx=new TrayApp(args,openSignal))Application.Run(ctx);}
-                catch(Exception e){MessageBox.Show(e.Message,"SnapLite — запуск не удался",MessageBoxButtons.OK,MessageBoxIcon.Error);}
+                catch(Exception e){MessageBox.Show(e.Message,Loc.T("SnapLite — запуск не удался"),MessageBoxButtons.OK,MessageBoxIcon.Error);}
                 finally{mutex.ReleaseMutex();}
             }
         }
@@ -72,13 +72,14 @@ namespace SnapLite
         public TrayApp(string[] args,EventWaitHandle openSignal)
         {
             bool first=!File.Exists(Settings.FilePath);string warning;settings=Settings.Load(out warning);
+            Loc.Configure(settings.Language);
             Glass.Configure(settings);
             settings.AutoStart=IsAutoStart();
             icon=Theme.Icon();menu=new ContextMenuStrip{Font=new Font("Segoe UI",10)};
-            menu.Items.Add("Выбрать область",null,delegate{BeginCapture(false);});
-            menu.Items.Add("Весь экран под курсором",null,delegate{BeginCapture(true);});
-            menu.Items.Add(new ToolStripSeparator());menu.Items.Add("Открыть папку снимков",null,delegate{OpenFolder();});
-            menu.Items.Add("Настройки…",null,delegate{ShowSettings();});menu.Items.Add(new ToolStripSeparator());menu.Items.Add("Выход",null,delegate{Quit();});
+            menu.Items.Add(Loc.T("Выбрать область"),null,delegate{BeginCapture(false);});
+            menu.Items.Add(Loc.T("Весь экран под курсором"),null,delegate{BeginCapture(true);});
+            menu.Items.Add(new ToolStripSeparator());menu.Items.Add(Loc.T("Открыть папку снимков"),null,delegate{OpenFolder();});
+            menu.Items.Add(Loc.T("Настройки…"),null,delegate{ShowSettings();});menu.Items.Add(new ToolStripSeparator());menu.Items.Add(Loc.T("Выход"),null,delegate{Quit();});
             Glass.StyleMenu(menu);
             tray=new NotifyIcon {Icon=icon,Text="SnapLite",ContextMenuStrip=menu,Visible=true};
             tray.MouseClick+=delegate(object s,MouseEventArgs e){if(e.Button==MouseButtons.Left)BeginCapture(false);};
@@ -88,7 +89,7 @@ namespace SnapLite
             {
                 settings.Hotkey=(int)Keys.S;settings.Modifiers=6;
                 if(!hotkey.TrySet(settings.Hotkey,settings.Modifiers)){settings.Hotkey=(int)Keys.F8;settings.Modifiers=3;hotkey.TrySet(settings.Hotkey,settings.Modifiers);}
-                warning="Исходная горячая клавиша занята. Проверьте сочетание в настройках.";
+                warning=Loc.T("Исходная горячая клавиша занята. Проверьте сочетание в настройках.");
             }
             UpdateTray();
             if(Array.IndexOf(args,"--demo")>=0)ShowEditor(Tests.MakeDemo());
@@ -99,7 +100,7 @@ namespace SnapLite
         private void UpdateTray()
         {
             string key=Hotkeys.Label(settings.Hotkey,settings.Modifiers);tray.Text="SnapLite • "+key;
-            menu.Items[0].Text="Выбрать область  ("+key+")";
+            menu.Items[0].Text=Loc.T("Выбрать область  (")+key+")";
         }
         private void ShowSettings()
         {
@@ -110,12 +111,12 @@ namespace SnapLite
         }
         private string ApplySettings(Settings value)
         {
-            if(!hotkey.TrySet(value.Hotkey,value.Modifiers))return "Эта горячая клавиша уже занята другой программой. Выберите другое сочетание.";
+            if(!hotkey.TrySet(value.Hotkey,value.Modifiers))return Loc.T("Эта горячая клавиша уже занята другой программой. Выберите другое сочетание.");
             bool changeAuto=value.AutoStart!=settings.AutoStart;
             try
             {
                 if(changeAuto)SetAutoStart(value.AutoStart);
-                value.Save(Settings.FilePath);settings=value;Glass.Configure(settings);Glass.StyleMenu(menu);
+                value.Save(Settings.FilePath);settings=value;Loc.Configure(settings.Language);Loc.ApplyMenu(menu);Glass.Configure(settings);Glass.StyleMenu(menu);
                 var priorIcon=icon;icon=Theme.Icon();tray.Icon=icon;priorIcon.Dispose();
                 foreach(var editor in editors)if(!editor.IsDisposed)editor.ApplyAppearance(settings);
                 UpdateTray();return null;
@@ -140,7 +141,7 @@ namespace SnapLite
         private void BeginCapture(bool full)
         {
             if(exit)return;
-            if(captureTimer!=null){captureTimer.Stop();captureTimer.Dispose();captureTimer=null;RestoreWindows();Notify("Захват отменён.");if(showSettingsAfterCapture){showSettingsAfterCapture=false;ShowSettings();}return;}
+            if(captureTimer!=null){captureTimer.Stop();captureTimer.Dispose();captureTimer=null;RestoreWindows();Notify(Loc.T("Захват отменён."));if(showSettingsAfterCapture){showSettingsAfterCapture=false;ShowSettings();}return;}
             if(busy)return;
             var monitor=Screen.FromPoint(Cursor.Position).Bounds;
             if(settingsForm!=null&&settingsForm.Visible)settingsForm.Hide();
@@ -165,17 +166,17 @@ namespace SnapLite
                     {
                         if(requestedAction=="Editor"){ShowEditor(selected);selected=null;}
                         else using(var image=Images.Resize(selected,settings.OutputScale))
-                        {if(requestedAction=="Copy"){Images.Copy(image);Notify("Скриншот скопирован в буфер обмена.");}else Notify("Сохранено: "+Images.SaveUnique(image,settings));}
+                        {if(requestedAction=="Copy"){Images.Copy(image);Notify(Loc.T("Скриншот скопирован в буфер обмена."));}else Notify(Loc.T("Сохранено: ")+Images.SaveUnique(image,settings));}
                     }
                 }
-                catch(Exception e){RestoreWindows();MessageBox.Show(e.Message,"SnapLite — захват не удался",MessageBoxButtons.OK,MessageBoxIcon.Warning);}
+                catch(Exception e){RestoreWindows();MessageBox.Show(e.Message,Loc.T("SnapLite — захват не удался"),MessageBoxButtons.OK,MessageBoxIcon.Warning);}
                 finally{if(selected!=null)selected.Dispose();busy=false;if(showSettingsAfterCapture){showSettingsAfterCapture=false;ShowSettings();}}
             };
             captureTimer.Start();
         }
         private void RestoreWindows()
         {
-            if(settingsForm!=null&&!settingsForm.IsDisposed)settingsForm.Show();
+            if(settingsForm!=null&&!settingsForm.IsDisposed){settingsForm.RestorePreview();settingsForm.Show();}
             foreach(var f in editors)if(!f.IsDisposed)f.Show();
         }
         private void ShowEditor(Bitmap image)
@@ -185,7 +186,7 @@ namespace SnapLite
         private void OpenFolder()
         {
             try{Directory.CreateDirectory(settings.SaveFolder);Process.Start(new ProcessStartInfo{FileName=settings.SaveFolder,UseShellExecute=true});}
-            catch(Exception e){MessageBox.Show(e.Message,"SnapLite — папка недоступна",MessageBoxButtons.OK,MessageBoxIcon.Warning);}
+            catch(Exception e){MessageBox.Show(e.Message,Loc.T("SnapLite — папка недоступна"),MessageBoxButtons.OK,MessageBoxIcon.Warning);}
         }
         private void Notify(string message)
         {

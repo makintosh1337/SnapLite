@@ -18,6 +18,7 @@ namespace SnapLite
         private bool dragging;
         private int hit=-2;
         private readonly GlassPanel actions;
+        private readonly GlassButton sizeButton;
         private readonly Settings appearance;
         private readonly ToolTip tip=new ToolTip();
         public Rectangle Selection {get;private set;}
@@ -26,8 +27,9 @@ namespace SnapLite
         public SelectionForm(Bitmap screen,Rectangle desktop,bool magnifier,string defaultAction,Settings settings)
         {
             this.screen=screen;this.desktop=desktop;this.magnifier=magnifier;appearance=settings;
+            Loc.Configure(settings.Language);
             RequestedAction=defaultAction;
-            Text="SnapLite — выделите область"; FormBorderStyle=FormBorderStyle.None;
+            Text=Loc.T("SnapLite — выделите область"); FormBorderStyle=FormBorderStyle.None;
             AutoScaleMode=AutoScaleMode.None; StartPosition=FormStartPosition.Manual; Bounds=desktop;
             TopMost=true;ShowInTaskbar=false;DoubleBuffered=true;KeyPreview=true;Cursor=Cursors.Cross;
             mouse=PointToClient(System.Windows.Forms.Cursor.Position);
@@ -38,16 +40,19 @@ namespace SnapLite
             {
                 int buttonWidth=settings.ShowToolLabels?width:38;
                 var button=new GlassButton {Text=settings.ShowToolLabels?text:"",Glyph=glyph,Primary=action==defaultAction,Size=new Size(buttonWidth,36),Margin=new Padding(2),Font=new Font("Segoe UI",9)};
-                button.Click+=delegate{RequestedAction=action;Complete();};tip.SetToolTip(button,text+(action==defaultAction?" (Enter)":(action=="Copy"?" (Ctrl+C)":(action=="Save"?" (Ctrl+S)":""))));row.Controls.Add(button);actionWidth+=buttonWidth+4;
+                button.Click+=delegate{RequestedAction=action;Complete();};Loc.SetToolTip(tip,button,text+(action==defaultAction?" (Enter)":(action=="Copy"?" (Ctrl+C)":(action=="Save"?" (Ctrl+S)":""))));row.Controls.Add(button);actionWidth+=buttonWidth+4;
             };
-            add("Editor","Правка","✎",104);
+            add("Editor",Loc.T("Правка"),"✎",104);
             foreach(string token in settings.ButtonOrder.Split(','))
             {
-                if(token=="Copy")add("Copy","Копировать","▣",136);
-                else if(token=="QuickSave")add("Save","В папку","↓",112);
+                if(token=="Copy")add("Copy",Loc.T("Копировать"),"▣",136);
+                else if(token=="QuickSave")add("Save",Loc.T("В папку"),"↓",112);
             }
-            var cancel=new GlassButton {Glyph="×",Size=new Size(36,36),Margin=new Padding(2)};cancel.Click+=delegate{Close();};tip.SetToolTip(cancel,"Отмена (Esc)");row.Controls.Add(cancel);actionWidth+=40;
+            var cancel=new GlassButton {Glyph="×",Size=new Size(36,36),Margin=new Padding(2)};cancel.Click+=delegate{Close();};Loc.SetToolTip(tip,cancel,Loc.T("Отмена (Esc)"));row.Controls.Add(cancel);actionWidth+=40;
             actions.Size=new Size(actionWidth+12,52);Controls.Add(actions);
+            sizeButton=new GlassButton{Visible=false,Height=28,Font=new Font("Segoe UI",10),Padding=new Padding(10,0,10,0),Cursor=Cursors.Hand};
+            sizeButton.Click+=delegate{EditSelectionSize();};Controls.Add(sizeButton);
+            Loc.SetToolTip(tip,sizeButton,Loc.T("Нажмите, чтобы задать размер (F2)"));
             Shown+=delegate{Bounds=desktop;Activate();Focus();};
         }
         private Point ClampPoint(Point p) {return new Point(Math.Max(0,Math.Min(ClientSize.Width,p.X)),Math.Max(0,Math.Min(ClientSize.Height,p.Y)));}
@@ -66,7 +71,7 @@ namespace SnapLite
         {
             base.OnMouseDown(e);if(e.Button==MouseButtons.Right){Close();return;}
             if(e.Button!=MouseButtons.Left)return;
-            origin=ClampPoint(e.Location);initial=Selection;hit=Hit(origin);dragging=true;Capture=true;actions.Visible=false;
+            origin=ClampPoint(e.Location);initial=Selection;hit=Hit(origin);dragging=true;Capture=true;actions.Visible=false;sizeButton.Visible=false;
             if(hit==-2)Selection=new Rectangle(origin,Size.Empty);Invalidate();
         }
         protected override void OnMouseMove(MouseEventArgs e)
@@ -113,7 +118,7 @@ namespace SnapLite
         protected override void OnMouseDoubleClick(MouseEventArgs e) {base.OnMouseDoubleClick(e);if(Selection.Contains(e.Location))Complete();}
         private void PositionActions()
         {
-            if(Selection.Width<2||Selection.Height<2){actions.Visible=false;return;}
+            if(Selection.Width<2||Selection.Height<2){actions.Visible=false;sizeButton.Visible=false;return;}
             var monitor=Screen.FromPoint(new Point(Selection.Right-1+desktop.X,Selection.Bottom-1+desktop.Y)).Bounds;
             monitor.Offset(-desktop.X,-desktop.Y);
             int targetX=appearance.ActionPosition=="Left"?Selection.Left:Selection.Right-actions.Width;
@@ -124,12 +129,41 @@ namespace SnapLite
             if(y+actions.Height>monitor.Bottom-8)y=Selection.Top-actions.Height-12;
             y=Math.Max(monitor.Top+8,Math.Min(monitor.Bottom-actions.Height-8,y));
             actions.Location=new Point(x,y);actions.Visible=true;
+            UpdateSizeButton();
+        }
+        private Rectangle SizeBadgeBounds()
+        {
+            string text=Selection.Width+" × "+Selection.Height+" px";
+            var measured=TextRenderer.MeasureText(text,labelFont,Size.Empty,TextFormatFlags.SingleLine|TextFormatFlags.NoPadding);
+            int width=measured.Width+24,y=Selection.Top>38?Selection.Top-36:Selection.Top+9;
+            int x=Math.Min(Math.Max(8,Selection.Left),Math.Max(8,ClientSize.Width-width-8));
+            return new Rectangle(x,y,width,28);
+        }
+        private void UpdateSizeButton()
+        {
+            if(Selection.Width<2||Selection.Height<2)return;
+            sizeButton.Text=Selection.Width+" × "+Selection.Height+" px";sizeButton.Bounds=SizeBadgeBounds();sizeButton.Visible=!dragging;sizeButton.BringToFront();
+        }
+        private void EditSelectionSize()
+        {
+            if(Selection.Width<2||Selection.Height<2||dragging)return;
+            using(var dialog=new AreaSizeForm(Selection.Size,ClientSize))
+            {
+                dialog.TopMost=true;
+                var area=Screen.FromRectangle(new Rectangle(Selection.X+desktop.X,Selection.Y+desktop.Y,Selection.Width,Selection.Height)).WorkingArea;
+                dialog.StartPosition=FormStartPosition.Manual;
+                int x=Selection.X+desktop.X+Selection.Width/2-dialog.Width/2,y=Selection.Y+desktop.Y+Selection.Height/2-dialog.Height/2;
+                dialog.Location=new Point(Math.Max(area.Left,Math.Min(area.Right-dialog.Width,x)),Math.Max(area.Top,Math.Min(area.Bottom-dialog.Height,y)));
+                if(dialog.ShowDialog(this)==DialogResult.OK)Selection=Images.FitSelectionSize(Selection,dialog.ChosenSize,ClientSize);
+            }
+            PositionActions();Activate();Focus();Invalidate();
         }
         private void Complete() {if(Selection.Width<2||Selection.Height<2)return;DialogResult=DialogResult.OK;Close();}
         protected override bool ProcessCmdKey(ref Message msg,Keys keyData)
         {
             Keys key=keyData&Keys.KeyCode;
             if(key==Keys.Escape){Close();return true;}
+            if(keyData==Keys.F2){EditSelectionSize();return true;}
             if(keyData==(Keys.Control|Keys.C)){RequestedAction="Copy";Complete();return true;}
             if(keyData==(Keys.Control|Keys.S)){RequestedAction="Save";Complete();return true;}
             if(key==Keys.Enter){Complete();return true;}
@@ -166,18 +200,19 @@ namespace SnapLite
                     using(var b=new SolidBrush(Glass.Accent))g.FillEllipse(b,h.X-4,h.Y-4,8,8);
                     using(var p=new Pen(Color.White,1.5f))g.DrawEllipse(p,h.X-4,h.Y-4,8,8);
                 }
-                string size=r.Width+" × "+r.Height+" px";var sz=g.MeasureString(size,labelFont);
-                int y=r.Top>38?r.Top-36:r.Top+9;int x=Math.Min(Math.Max(8,r.Left),Math.Max(8,ClientSize.Width-(int)sz.Width-28));
-                Glass.PaintCard(g,new Rectangle(x,y,(int)Math.Ceiling(sz.Width)+22,28),Glass.Surface,9);
-                using(var br=new SolidBrush(Glass.Text))g.DrawString(size,labelFont,br,x+11,y+5);
+                if(dragging)
+                {
+                    var badge=SizeBadgeBounds();Glass.PaintCard(g,badge,Glass.Surface,9);
+                    using(var br=new SolidBrush(Glass.Text))g.DrawString(r.Width+" × "+r.Height+" px",labelFont,br,badge.Left+11,badge.Top+5);
+                }
             }
             else
             {
                 var monitor=Screen.FromPoint(System.Windows.Forms.Cursor.Position).Bounds;monitor.Offset(-desktop.X,-desktop.Y);
                 var box=new Rectangle(monitor.Left+Math.Max(12,(monitor.Width-572)/2),monitor.Top+48,Math.Min(572,monitor.Width-24),84);
                 Glass.PaintCard(g,box,Glass.Surface,18);
-                using(var br=new SolidBrush(Glass.Text))g.DrawString("Выделите область мышью",titleFont,br,box.Left+22,box.Top+15);
-                using(var br=new SolidBrush(Glass.Muted))g.DrawString("Shift — квадрат  ·  Ctrl+A — весь экран  ·  Esc — отмена",labelFont,br,box.Left+22,box.Top+49);
+                using(var br=new SolidBrush(Glass.Text))g.DrawString(Loc.T("Выделите область мышью"),titleFont,br,box.Left+22,box.Top+15);
+                using(var br=new SolidBrush(Glass.Muted))g.DrawString(Loc.T("Shift — квадрат  ·  Ctrl+A — весь экран  ·  Esc — отмена"),labelFont,br,box.Left+22,box.Top+49);
             }
             if(magnifier && (!actions.Visible||dragging))PaintMagnifier(g);
             base.OnPaint(e);

@@ -62,6 +62,7 @@ namespace SnapLite
         public string ButtonOrder = "Copy,Save,QuickSave";
         public string ToolOrder = "Pen,Arrow,Rectangle,Marker,Text,Cover";
         public bool ShowToolLabels = true;
+        public string Language = "ru";
         public static string ProfileDirectory;
         public static string DirectoryPath { get { return ProfileDirectory ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SnapLite"); } }
         public static string FilePath { get { return Path.Combine(DirectoryPath, "settings.xml"); } }
@@ -77,7 +78,8 @@ namespace SnapLite
             if (Format != "PNG" && Format != "JPG") Format="PNG";
             if (CaptureAction != "Editor" && CaptureAction != "Copy" && CaptureAction != "Save") CaptureAction="Editor";
             if (String.IsNullOrWhiteSpace(SaveFolder)) SaveFolder=new Settings().SaveFolder;
-            Version=2;
+            Version=3;
+            Language=Loc.Normalize(Language);
             GlassOpacity=Math.Max(30,Math.Min(100,GlassOpacity));
             CornerRadius=Math.Max(0,Math.Min(28,CornerRadius));
             if(ThemePreset!="Midnight"&&ThemePreset!="Aurora"&&ThemePreset!="Pearl"&&ThemePreset!="Rose"&&ThemePreset!="Graphite"&&ThemePreset!="Custom")ThemePreset="Midnight";
@@ -103,7 +105,7 @@ namespace SnapLite
             warning=null;
             if (!File.Exists(FilePath)) return new Settings();
             try { using (var s=File.OpenRead(FilePath)) { var v=(Settings)new XmlSerializer(typeof(Settings)).Deserialize(s); v.Normalize(); return v; } }
-            catch (Exception e) { warning="Не удалось прочитать настройки. Используются стандартные.\n"+e.Message; return new Settings(); }
+            catch (Exception e) { warning=Loc.T("Не удалось прочитать настройки. Используются стандартные.\n")+e.Message; return new Settings(); }
         }
         public void Save(string path)
         {
@@ -138,6 +140,12 @@ namespace SnapLite
     {
         public static Rectangle FromPoints(Point a,Point b) { return Rectangle.FromLTRB(Math.Min(a.X,b.X),Math.Min(a.Y,b.Y),Math.Max(a.X,b.X),Math.Max(a.Y,b.Y)); }
         public static Rectangle Clamp(Rectangle r, Size bounds) { return Rectangle.Intersect(new Rectangle(Point.Empty,bounds),r); }
+        public static Rectangle FitSelectionSize(Rectangle selection,Size desired,Size bounds)
+        {
+            if(bounds.Width<2||bounds.Height<2)throw new ArgumentOutOfRangeException("bounds");
+            int width=Math.Max(2,Math.Min(bounds.Width,desired.Width)),height=Math.Max(2,Math.Min(bounds.Height,desired.Height));
+            return new Rectangle(Math.Max(0,Math.Min(bounds.Width-width,selection.X)),Math.Max(0,Math.Min(bounds.Height-height,selection.Y)),width,height);
+        }
         public static Bitmap Capture(Rectangle bounds, bool cursor)
         {
             Bitmap bitmap=new Bitmap(bounds.Width,bounds.Height,PixelFormat.Format32bppRgb);
@@ -165,7 +173,7 @@ namespace SnapLite
         {
             int w=Math.Max(1,(int)Math.Round(source.Width*percent/100.0));
             int h=Math.Max(1,(int)Math.Round(source.Height*percent/100.0));
-            if ((long)w*h > 80000000) throw new InvalidOperationException("Изображение слишком большое. Уменьшите масштаб или область (лимит 80 млн пикселей).");
+            if ((long)w*h > 80000000) throw new InvalidOperationException(Loc.T("Изображение слишком большое. Уменьшите масштаб или область (лимит 80 млн пикселей)."));
             var result=new Bitmap(w,h,PixelFormat.Format32bppRgb);
             try { using (var g=Graphics.FromImage(result)) { g.Clear(Color.White); g.InterpolationMode=InterpolationMode.HighQualityBicubic; g.PixelOffsetMode=PixelOffsetMode.HighQuality; using (var attr=new ImageAttributes()) { attr.SetWrapMode(WrapMode.TileFlipXY); g.DrawImage(source,new Rectangle(0,0,w,h),0,0,source.Width,source.Height,GraphicsUnit.Pixel,attr); } } return result; }
             catch { result.Dispose(); throw; }
@@ -192,7 +200,7 @@ namespace SnapLite
                 try { using(stream) Encode(image,stream,s.Format,s.JpegQuality); return path; }
                 catch { if (File.Exists(path)) File.Delete(path); throw; }
             }
-            throw new IOException("Не удалось выбрать свободное имя файла.");
+            throw new IOException(Loc.T("Не удалось выбрать свободное имя файла."));
         }
         public static void Copy(Bitmap bitmap)
         {

@@ -66,6 +66,45 @@ namespace SnapLite
             Check(restored.ToolbarPosition=="Left"&&restored.ActionPosition=="Left"&&restored.SelectionToolbarPosition=="Above"&&restored.ButtonOrder=="QuickSave,Copy,Save"&&restored.ToolOrder=="Cover,Text,Marker,Rectangle,Arrow,Pen"&&!restored.ShowToolLabels,"custom button arrangement survives restart");
             Check(restored.Hotkey==custom.Hotkey&&restored.Modifiers==custom.Modifiers&&restored.IncludeCursor==custom.IncludeCursor&&restored.Magnifier==custom.Magnifier&&restored.DelaySeconds==custom.DelaySeconds&&restored.CaptureAction==custom.CaptureAction&&restored.OutputScale==custom.OutputScale&&restored.Format==custom.Format&&restored.JpegQuality==custom.JpegQuality&&restored.CloseAfterAction==custom.CloseAfterAction,"saving appearance preserves capture preferences");
         }
+        private static void CheckLanguageAndSize(string dir)
+        {
+            var defaults=new Settings();Check(defaults.Language=="ru","existing users keep Russian by default");
+            defaults.Language="EN";defaults.Normalize();Check(defaults.Language=="en","English language code is normalized");
+            defaults.Language="invalid";defaults.Normalize();Check(defaults.Language=="ru","unknown language safely falls back to Russian");
+            var saved=new Settings{Language="en",Hotkey=(int)Keys.F9,Modifiers=2,OutputScale=175,ThemePreset="Custom",SaveFolder=dir};
+            string path=Path.Combine(dir,"language-settings.xml");saved.Save(path);var restored=ReadSettings(path);restored.Normalize();
+            Check(restored.Language=="en"&&restored.Hotkey==(int)Keys.F9&&restored.Modifiers==2&&restored.OutputScale==175&&restored.ThemePreset=="Custom","language survives restart without changing capture or appearance");
+            var draft=saved.Clone();draft.Language="ru";Check(saved.Language=="en","language draft is independent");
+            Check(ReadSettings(Path.Combine(dir,"legacy-settings.xml")).Language=="ru","legacy profiles gain Russian language default");
+            Loc.Configure("en");
+            try
+            {
+                Check(Loc.T("Настройки")=="Settings"&&Loc.T("Размер области")=="Area size"&&Loc.T("Перо")=="Pen","English translation covers settings, dimensions and editing");
+                using(var form=new Form())using(var tips=new ToolTip())using(var menu=new ContextMenuStrip())
+                {
+                    var label=new Label{Text="Настройки"};var input=new TextBox{Text="Текст"};
+                    var combo=new ComboBox();combo.Items.AddRange(new object[]{"По окну","Слева"});combo.SelectedIndex=1;
+                    form.Controls.Add(label);form.Controls.Add(input);form.Controls.Add(combo);Loc.SetToolTip(tips,label,"Копировать (Ctrl+C)");
+                    menu.Items.Add("Настройки…");Loc.Apply(form);Loc.ApplyMenu(menu);
+                    Check(label.Text=="Settings"&&input.Text=="Текст","translation preserves editable user text");
+                    Check(combo.SelectedIndex==1&&(string)combo.Items[0]=="Fit to window"&&(string)combo.Items[1]=="Left","language change preserves combo selection");
+                    Check(tips.GetToolTip(label)=="Copy (Ctrl+C)"&&menu.Items[0].Text=="Settings…","tooltips and tray menus use the selected language");
+                    Loc.Configure("ru");Loc.Apply(form);Loc.ApplyMenu(menu);
+                    Check(label.Text=="Настройки"&&combo.SelectedIndex==1&&(string)combo.Items[0]=="По окну"&&tips.GetToolTip(label)=="Копировать (Ctrl+C)"&&menu.Items[0].Text=="Настройки…","live language switch can return to Russian");
+                }
+            }
+            finally{Loc.Configure("ru");}
+            Check(Images.FitSelectionSize(new Rectangle(25,30,10,10),new Size(969,568),new Size(1920,1080))==new Rectangle(25,30,969,568),"exact area dimensions preserve the origin when they fit");
+            Check(Images.FitSelectionSize(new Rectangle(1800,900,100,100),new Size(1024,768),new Size(1920,1080))==new Rectangle(896,312,1024,768),"near screen edges area moves instead of losing requested dimensions");
+            Check(Images.FitSelectionSize(new Rectangle(50,60,100,100),new Size(5000,5000),new Size(1920,1080))==new Rectangle(0,0,1920,1080),"area dimensions cannot exceed captured desktop");
+            Check(Images.FitSelectionSize(new Rectangle(2000,-30,10,10),new Size(-1,0),new Size(1920,1080))==new Rectangle(1918,0,2,2),"invalid dimensions and origins remain inside the capture");
+            using(var bitmap=new Bitmap(80,60))
+            {
+                using(var g=Graphics.FromImage(bitmap)){g.Clear(Color.White);g.FillRectangle(Brushes.Red,50,40,30,20);}
+                var area=Images.FitSelectionSize(new Rectangle(75,55,5,5),new Size(30,20),bitmap.Size);
+                using(var crop=bitmap.Clone(area,PixelFormat.Format32bppRgb))Check(crop.Size==new Size(30,20)&&crop.GetPixel(0,0).R==255&&crop.GetPixel(0,0).G==0,"custom area crops original pixels at the fitted coordinates");
+            }
+        }
         public static Bitmap MakeDemo()
         {
             var b=new Bitmap(900,480);
@@ -94,6 +133,7 @@ namespace SnapLite
                 string xml=Path.Combine(dir,"settings.xml");settings.Save(xml);settings.OutputScale=50;settings.Save(xml);
                 using(var s=File.OpenRead(xml)){var loaded=(Settings)new XmlSerializer(typeof(Settings)).Deserialize(s);Check(loaded.OutputScale==50&&loaded.SaveFolder==dir,"settings round trip and atomic replacement");}
                 CheckAppearance(dir);
+                CheckLanguageAndSize(dir);
                 using(var source=new Bitmap(80,60))
                 {
                     using(var g=Graphics.FromImage(source))g.Clear(Color.White);

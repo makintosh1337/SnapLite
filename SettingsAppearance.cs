@@ -42,7 +42,7 @@ namespace SnapLite
         private static int Rgb(int rgb){return unchecked((int)0xff000000)|rgb;}
         private sealed class OrderItem
         {
-            public string Id,Label;public OrderItem(string id,string label){Id=id;Label=label;}public override string ToString(){return Label;}
+            public string Id,Label;public OrderItem(string id,string label){Id=id;Label=label;}public override string ToString(){return Loc.Display(Label);}
         }
         private ListBox OrderCard(FlowLayoutPanel page,string title,string order,string[] ids,string[] labels,bool tools)
         {
@@ -76,11 +76,11 @@ namespace SnapLite
         {
             using(var f=new GlassForm{Text=name,ClientSize=new Size(345,174),FormBorderStyle=FormBorderStyle.FixedDialog,StartPosition=FormStartPosition.CenterParent,MaximizeBox=false,MinimizeBox=false})
             {
-                f.Controls.Add(new Label{Text="HEX-цвет  #RRGGBB",Location=new Point(18,16),AutoSize=true,BackColor=Color.Transparent});
-                var value=new GlassField{Text="#"+(initial&0xffffff).ToString("X6"),Bounds=new Rectangle(18,43,184,35)};f.Controls.Add(value);var palette=new GlassButton{Text="Палитра…",Bounds=new Rectangle(212,43,114,35)};f.Controls.Add(palette);
+                f.Controls.Add(new Label{Text=Loc.T("HEX-цвет  #RRGGBB"),Location=new Point(18,16),AutoSize=true,BackColor=Color.Transparent});
+                var value=new GlassField{Text="#"+(initial&0xffffff).ToString("X6"),Bounds=new Rectangle(18,43,184,35)};f.Controls.Add(value);var palette=new GlassButton{Text=Loc.T("Палитра…"),Bounds=new Rectangle(212,43,114,35)};f.Controls.Add(palette);
                 palette.Click+=delegate{using(var d=new ColorDialog{Color=Color.FromArgb(initial),FullOpen=true})if(d.ShowDialog(f)==DialogResult.OK)value.Text="#"+(d.Color.ToArgb()&0xffffff).ToString("X6");};
-                var cancel=new GlassButton{Text="Отмена",Bounds=new Rectangle(100,117,94,36),DialogResult=DialogResult.Cancel};f.Controls.Add(cancel);var ok=new GlassButton{Text="Применить",Primary=true,Bounds=new Rectangle(204,117,122,36)};f.Controls.Add(ok);int result=initial;
-                ok.Click+=delegate{int rgb;string text=value.Text.Trim().TrimStart('#');if(text.Length!=6||!int.TryParse(text,NumberStyles.HexNumber,CultureInfo.InvariantCulture,out rgb)){MessageBox.Show(f,"Введите цвет в формате #RRGGBB.","Цвет",MessageBoxButtons.OK,MessageBoxIcon.Information);return;}result=unchecked((int)0xff000000)|rgb;f.DialogResult=DialogResult.OK;f.Close();};f.CancelButton=cancel;f.AcceptButton=ok;Glass.Apply(f);return f.ShowDialog(owner)==DialogResult.OK?(int?)result:null;
+                var cancel=new GlassButton{Text=Loc.T("Отмена"),Bounds=new Rectangle(100,117,94,36),DialogResult=DialogResult.Cancel};f.Controls.Add(cancel);var ok=new GlassButton{Text=Loc.T("Применить"),Primary=true,Bounds=new Rectangle(204,117,122,36)};f.Controls.Add(ok);int result=initial;
+                ok.Click+=delegate{int rgb;string text=value.Text.Trim().TrimStart('#');if(text.Length!=6||!int.TryParse(text,NumberStyles.HexNumber,CultureInfo.InvariantCulture,out rgb)){MessageBox.Show(f,Loc.T("Введите цвет в формате #RRGGBB."),Loc.T("Цвет"),MessageBoxButtons.OK,MessageBoxIcon.Information);return;}result=unchecked((int)0xff000000)|rgb;f.DialogResult=DialogResult.OK;f.Close();};f.CancelButton=cancel;f.AcceptButton=ok;Glass.Apply(f);return f.ShowDialog(owner)==DialogResult.OK?(int?)result:null;
             }
         }
     }
@@ -91,19 +91,19 @@ namespace SnapLite
         protected override void OnPaintBackground(PaintEventArgs e){Glass.PaintParent(this,e.Graphics);}
         protected override void OnMouseUp(MouseEventArgs e)
         {
-            base.OnMouseUp(e);if(e.Button!=MouseButtons.Right)return;var menu=new ContextMenuStrip();menu.Items.Add("Выбрать область");menu.Items.Add("Открыть папку снимков");menu.Items.Add(new ToolStripSeparator());menu.Items.Add("Настройки…");Glass.StyleMenu(menu);menu.Closed+=delegate{menu.Dispose();};menu.Show(this,e.Location);
+            base.OnMouseUp(e);if(e.Button!=MouseButtons.Right)return;var menu=new ContextMenuStrip();menu.Items.Add(Loc.T("Выбрать область"));menu.Items.Add(Loc.T("Открыть папку снимков"));menu.Items.Add(new ToolStripSeparator());menu.Items.Add(Loc.T("Настройки…"));Glass.StyleMenu(menu);menu.Closed+=delegate{menu.Dispose();};menu.Show(this,e.Location);
         }
         protected override void OnPaint(PaintEventArgs e)
         {
             var s=get();var g=e.Graphics;Glass.PaintParent(this,g);g.SmoothingMode=SmoothingMode.AntiAlias;Glass.PaintCard(g,ClientRectangle,Glass.Surface,Glass.Radius);
-            using(var f=new Font("Segoe UI",9,FontStyle.Bold))using(var b=new SolidBrush(Glass.Text))g.DrawString("Предпросмотр",f,b,15,12);
-            using(var b=new SolidBrush(Glass.Muted))g.DrawString(s.ToolbarPosition=="Top"?"сверху":(s.ToolbarPosition=="Bottom"?"снизу":(s.ToolbarPosition=="Left"?"слева":"справа")),Font,b,Width-70,12);
+            using(var f=new Font("Segoe UI",9,FontStyle.Bold))using(var b=new SolidBrush(Glass.Text))g.DrawString(Loc.T("Предпросмотр"),f,b,15,12);
+            using(var b=new SolidBrush(Glass.Muted))g.DrawString(s.ToolbarPosition=="Top"?Loc.T("сверху"):(s.ToolbarPosition=="Bottom"?Loc.T("снизу"):(s.ToolbarPosition=="Left"?Loc.T("слева"):Loc.T("справа"))),Font,b,Width-70,12);
             int x=15,y=40,w=Width-30;using(var b=new SolidBrush(Color.FromArgb(90,Glass.Menu)))using(var p=Glass.Round(new RectangleF(x,y,w,35),Math.Min(12,Glass.Radius)))g.FillPath(b,p);
             string[] items=s.ButtonOrder.Split(',');int start=s.ActionPosition=="Left"?x+6:Math.Max(x+6,Width-272);
             for(int i=0;i<items.Length;i++)
             {
                 var box=new Rectangle(start+i*84,y+5,77,25);using(var b=new SolidBrush(i==0?Glass.Accent:Glass.Secondary))using(var p=Glass.Round(box,Math.Min(9,Glass.Radius)))g.FillPath(b,p);
-                string text=items[i]=="Copy"?"Копия":(items[i]=="Save"?"Сохранить":"В папку");TextRenderer.DrawText(g,text,Font,box,i==0?(Glass.IsDark?Color.FromArgb(20,22,35):Color.White):Glass.Text,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|Glass.TextFlags);
+                string text=items[i]=="Copy"?Loc.T("Копия"):(items[i]=="Save"?Loc.T("Сохранить"):Loc.T("В папку"));TextRenderer.DrawText(g,text,Font,box,i==0?(Glass.IsDark?Color.FromArgb(20,22,35):Color.White):Glass.Text,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|Glass.TextFlags);
             }
         }
     }
