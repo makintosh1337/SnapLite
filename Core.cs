@@ -45,6 +45,23 @@ namespace SnapLite
         public bool AutoStart = false;
         public int PenWidth = 3;
         public int PenColor = Color.FromArgb(255, 72, 100).ToArgb();
+        public string ThemePreset = "Midnight";
+        public int BackgroundColor = Color.FromArgb(17,21,34).ToArgb();
+        public int PanelColor = Color.FromArgb(35,42,63).ToArgb();
+        public int TextColor = Color.FromArgb(239,243,255).ToArgb();
+        public int AccentColor = Color.FromArgb(143,124,255).ToArgb();
+        public int Accent2Color = Color.FromArgb(103,211,244).ToArgb();
+        public int MenuColor = Color.FromArgb(28,34,52).ToArgb();
+        public int ButtonColor = Color.FromArgb(49,57,81).ToArgb();
+        public int BorderColor = Color.FromArgb(150,169,210).ToArgb();
+        public int GlassOpacity = 82;
+        public int CornerRadius = 16;
+        public string ToolbarPosition = "Top";
+        public string ActionPosition = "Right";
+        public string SelectionToolbarPosition = "Below";
+        public string ButtonOrder = "Copy,Save,QuickSave";
+        public string ToolOrder = "Pen,Arrow,Rectangle,Marker,Text,Cover";
+        public bool ShowToolLabels = true;
         public static string ProfileDirectory;
         public static string DirectoryPath { get { return ProfileDirectory ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SnapLite"); } }
         public static string FilePath { get { return Path.Combine(DirectoryPath, "settings.xml"); } }
@@ -60,6 +77,26 @@ namespace SnapLite
             if (Format != "PNG" && Format != "JPG") Format="PNG";
             if (CaptureAction != "Editor" && CaptureAction != "Copy" && CaptureAction != "Save") CaptureAction="Editor";
             if (String.IsNullOrWhiteSpace(SaveFolder)) SaveFolder=new Settings().SaveFolder;
+            Version=2;
+            GlassOpacity=Math.Max(30,Math.Min(100,GlassOpacity));
+            CornerRadius=Math.Max(0,Math.Min(28,CornerRadius));
+            if(ThemePreset!="Midnight"&&ThemePreset!="Aurora"&&ThemePreset!="Pearl"&&ThemePreset!="Rose"&&ThemePreset!="Graphite"&&ThemePreset!="Custom")ThemePreset="Midnight";
+            BackgroundColor=Opaque(BackgroundColor);PanelColor=Opaque(PanelColor);TextColor=Opaque(TextColor);AccentColor=Opaque(AccentColor);
+            Accent2Color=Opaque(Accent2Color);MenuColor=Opaque(MenuColor);ButtonColor=Opaque(ButtonColor);BorderColor=Opaque(BorderColor);
+            if(ToolbarPosition!="Top"&&ToolbarPosition!="Bottom"&&ToolbarPosition!="Left"&&ToolbarPosition!="Right")ToolbarPosition="Top";
+            if(ActionPosition!="Left"&&ActionPosition!="Right")ActionPosition="Right";
+            if(SelectionToolbarPosition!="Above"&&SelectionToolbarPosition!="Below")SelectionToolbarPosition="Below";
+            ButtonOrder=NormalizeOrder(ButtonOrder,"Copy,Save,QuickSave");
+            ToolOrder=NormalizeOrder(ToolOrder,"Pen,Arrow,Rectangle,Marker,Text,Cover");
+        }
+        private static int Opaque(int argb){return Color.FromArgb(255,Color.FromArgb(argb)).ToArgb();}
+        private static string NormalizeOrder(string value,string canonical)
+        {
+            if(String.IsNullOrEmpty(value))return canonical;
+            var expected=canonical.Split(',');var actual=value.Split(',');
+            if(actual.Length!=expected.Length)return canonical;
+            var seen=new HashSet<string>();foreach(var item in actual)if(Array.IndexOf(expected,item)<0||!seen.Add(item))return canonical;
+            return value;
         }
         public static Settings Load(out string warning)
         {
@@ -221,11 +258,13 @@ namespace SnapLite
     }
     public static class Theme
     {
-        public static readonly Color Background=Color.FromArgb(245,247,251), Ink=Color.FromArgb(31,41,60), Accent=Color.FromArgb(95,76,230), Muted=Color.FromArgb(100,111,132);
+        public static Color Background {get{return Glass.Background;}}
+        public static Color Ink {get{return Glass.Text;}}
+        public static Color Accent {get{return Glass.Accent;}}
+        public static Color Muted {get{return Glass.Muted;}}
         public static Button Button(string text,int width,bool accent)
         {
-            var b=new Button {Text=text,Width=width,Height=36,FlatStyle=FlatStyle.Flat,BackColor=accent?Accent:Color.White,ForeColor=accent?Color.White:Ink,Cursor=Cursors.Hand,Margin=new Padding(4)};
-            b.FlatAppearance.BorderColor=accent?Accent:Color.FromArgb(220,225,235); return b;
+            return new GlassButton {Text=text,Width=width,Height=36,Primary=accent,Cursor=Cursors.Hand,Margin=new Padding(4)};
         }
         public static Icon Icon()
         {

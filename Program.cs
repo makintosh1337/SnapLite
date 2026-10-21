@@ -11,7 +11,7 @@ using Microsoft.Win32;
 
 [assembly: AssemblyTitle("SnapLite")]
 [assembly: AssemblyDescription("Лёгкий инструмент для локальных скриншотов")]
-[assembly: AssemblyVersion("1.0.0.0")]
+[assembly: AssemblyVersion("1.1.0.0")]
 namespace SnapLite
 {
     internal static class Program
@@ -60,7 +60,7 @@ namespace SnapLite
         private Settings settings;
         private readonly NotifyIcon tray;
         private readonly ContextMenuStrip menu;
-        private readonly Icon icon;
+        private Icon icon;
         private readonly HotkeyWindow hotkey;
         private SettingsForm settingsForm;
         private readonly List<EditorForm> editors=new List<EditorForm>();
@@ -72,12 +72,14 @@ namespace SnapLite
         public TrayApp(string[] args,EventWaitHandle openSignal)
         {
             bool first=!File.Exists(Settings.FilePath);string warning;settings=Settings.Load(out warning);
+            Glass.Configure(settings);
             settings.AutoStart=IsAutoStart();
             icon=Theme.Icon();menu=new ContextMenuStrip{Font=new Font("Segoe UI",10)};
             menu.Items.Add("Выбрать область",null,delegate{BeginCapture(false);});
             menu.Items.Add("Весь экран под курсором",null,delegate{BeginCapture(true);});
             menu.Items.Add(new ToolStripSeparator());menu.Items.Add("Открыть папку снимков",null,delegate{OpenFolder();});
             menu.Items.Add("Настройки…",null,delegate{ShowSettings();});menu.Items.Add(new ToolStripSeparator());menu.Items.Add("Выход",null,delegate{Quit();});
+            Glass.StyleMenu(menu);
             tray=new NotifyIcon {Icon=icon,Text="SnapLite",ContextMenuStrip=menu,Visible=true};
             tray.MouseClick+=delegate(object s,MouseEventArgs e){if(e.Button==MouseButtons.Left)BeginCapture(false);};
             hotkey=new HotkeyWindow();hotkey.CaptureRequested+=delegate{if(settingsForm==null||!settingsForm.EditingHotkey)BeginCapture(false);};hotkey.SettingsRequested+=ShowSettings;
@@ -113,7 +115,10 @@ namespace SnapLite
             try
             {
                 if(changeAuto)SetAutoStart(value.AutoStart);
-                value.Save(Settings.FilePath);settings=value;UpdateTray();return null;
+                value.Save(Settings.FilePath);settings=value;Glass.Configure(settings);Glass.StyleMenu(menu);
+                var priorIcon=icon;icon=Theme.Icon();tray.Icon=icon;priorIcon.Dispose();
+                foreach(var editor in editors)if(!editor.IsDisposed)editor.ApplyAppearance(settings);
+                UpdateTray();return null;
             }
             catch(Exception e)
             {
@@ -152,7 +157,7 @@ namespace SnapLite
                     {
                         Rectangle desktop=SystemInformation.VirtualScreen;
                         using(var shot=Images.Capture(desktop,settings.IncludeCursor))
-                        using(var selector=new SelectionForm(shot,desktop,settings.Magnifier,settings.CaptureAction))
+                        using(var selector=new SelectionForm(shot,desktop,settings.Magnifier,settings.CaptureAction,settings))
                         {if(selector.ShowDialog()==DialogResult.OK){selected=shot.Clone(selector.Selection,PixelFormat.Format32bppRgb);requestedAction=selector.RequestedAction;}}
                     }
                     RestoreWindows();

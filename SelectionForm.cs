@@ -17,24 +17,37 @@ namespace SnapLite
         private Rectangle initial;
         private bool dragging;
         private int hit=-2;
-        private readonly FlowLayoutPanel actions;
+        private readonly GlassPanel actions;
+        private readonly Settings appearance;
+        private readonly ToolTip tip=new ToolTip();
         public Rectangle Selection {get;private set;}
         public string RequestedAction {get;private set;}
-        public SelectionForm(Bitmap screen,Rectangle desktop,bool magnifier,string defaultAction)
+        public SelectionForm(Bitmap screen,Rectangle desktop,bool magnifier,string defaultAction):this(screen,desktop,magnifier,defaultAction,new Settings()){}
+        public SelectionForm(Bitmap screen,Rectangle desktop,bool magnifier,string defaultAction,Settings settings)
         {
-            this.screen=screen;this.desktop=desktop;this.magnifier=magnifier;
+            this.screen=screen;this.desktop=desktop;this.magnifier=magnifier;appearance=settings;
             RequestedAction=defaultAction;
             Text="SnapLite — выделите область"; FormBorderStyle=FormBorderStyle.None;
             AutoScaleMode=AutoScaleMode.None; StartPosition=FormStartPosition.Manual; Bounds=desktop;
             TopMost=true;ShowInTaskbar=false;DoubleBuffered=true;KeyPreview=true;Cursor=Cursors.Cross;
             mouse=PointToClient(System.Windows.Forms.Cursor.Position);
-            actions=new FlowLayoutPanel {AutoSize=true,AutoSizeMode=AutoSizeMode.GrowAndShrink,WrapContents=false,BackColor=Color.FromArgb(245,247,251),Padding=new Padding(4),Visible=false};
-            var ok=Theme.Button(defaultAction=="Copy"?"Копировать  ↵":(defaultAction=="Save"?"Сохранить  ↵":"В редактор  ↵"),155,true);ok.Click+=delegate{Complete();};
-            actions.Controls.Add(ok);
-            if(defaultAction!="Editor"){var edit=Theme.Button("Правка",80,false);edit.Click+=delegate{RequestedAction="Editor";Complete();};actions.Controls.Add(edit);}
-            if(defaultAction!="Copy"){var copy=Theme.Button("Копия",80,false);copy.Click+=delegate{RequestedAction="Copy";Complete();};actions.Controls.Add(copy);}
-            if(defaultAction!="Save"){var save=Theme.Button("В папку",85,false);save.Click+=delegate{RequestedAction="Save";Complete();};actions.Controls.Add(save);}
-            var cancel=Theme.Button("×",36,false);cancel.Click+=delegate{Close();};actions.Controls.Add(cancel);Controls.Add(actions);
+            actions=new GlassPanel {Padding=new Padding(6),Visible=false,Cursor=Cursors.Default};
+            var row=new FlowLayoutPanel {Dock=DockStyle.Fill,WrapContents=false,BackColor=Color.Transparent,Margin=Padding.Empty};actions.Controls.Add(row);
+            int actionWidth=0;
+            Action<string,string,string,int> add=delegate(string action,string text,string glyph,int width)
+            {
+                int buttonWidth=settings.ShowToolLabels?width:38;
+                var button=new GlassButton {Text=settings.ShowToolLabels?text:"",Glyph=glyph,Primary=action==defaultAction,Size=new Size(buttonWidth,36),Margin=new Padding(2),Font=new Font("Segoe UI",9)};
+                button.Click+=delegate{RequestedAction=action;Complete();};tip.SetToolTip(button,text+(action==defaultAction?" (Enter)":(action=="Copy"?" (Ctrl+C)":(action=="Save"?" (Ctrl+S)":""))));row.Controls.Add(button);actionWidth+=buttonWidth+4;
+            };
+            add("Editor","Правка","✎",104);
+            foreach(string token in settings.ButtonOrder.Split(','))
+            {
+                if(token=="Copy")add("Copy","Копировать","▣",136);
+                else if(token=="QuickSave")add("Save","В папку","↓",112);
+            }
+            var cancel=new GlassButton {Glyph="×",Size=new Size(36,36),Margin=new Padding(2)};cancel.Click+=delegate{Close();};tip.SetToolTip(cancel,"Отмена (Esc)");row.Controls.Add(cancel);actionWidth+=40;
+            actions.Size=new Size(actionWidth+12,52);Controls.Add(actions);
             Shown+=delegate{Bounds=desktop;Activate();Focus();};
         }
         private Point ClampPoint(Point p) {return new Point(Math.Max(0,Math.Min(ClientSize.Width,p.X)),Math.Max(0,Math.Min(ClientSize.Height,p.Y)));}
@@ -101,10 +114,15 @@ namespace SnapLite
         private void PositionActions()
         {
             if(Selection.Width<2||Selection.Height<2){actions.Visible=false;return;}
-            var monitor=Screen.FromPoint(new Point(Selection.Right+desktop.X,Selection.Bottom+desktop.Y)).Bounds;
+            var monitor=Screen.FromPoint(new Point(Selection.Right-1+desktop.X,Selection.Bottom-1+desktop.Y)).Bounds;
             monitor.Offset(-desktop.X,-desktop.Y);
-            int x=Math.Max(monitor.Left+8,Math.Min(monitor.Right-actions.PreferredSize.Width-8,Selection.Right-actions.PreferredSize.Width));
-            int y=Selection.Bottom+10;if(y+actions.PreferredSize.Height>monitor.Bottom-8)y=Math.Max(monitor.Top+8,Selection.Top-actions.PreferredSize.Height-10);
+            int targetX=appearance.ActionPosition=="Left"?Selection.Left:Selection.Right-actions.Width;
+            int x=Math.Max(monitor.Left+8,Math.Min(monitor.Right-actions.Width-8,targetX));
+            bool above=appearance.SelectionToolbarPosition=="Above";
+            int y=above?Selection.Top-actions.Height-12:Selection.Bottom+12;
+            if(y<monitor.Top+8)y=Selection.Bottom+12;
+            if(y+actions.Height>monitor.Bottom-8)y=Selection.Top-actions.Height-12;
+            y=Math.Max(monitor.Top+8,Math.Min(monitor.Bottom-actions.Height-8,y));
             actions.Location=new Point(x,y);actions.Visible=true;
         }
         private void Complete() {if(Selection.Width<2||Selection.Height<2)return;DialogResult=DialogResult.OK;Close();}
@@ -126,31 +144,40 @@ namespace SnapLite
             }
             return base.ProcessCmdKey(ref msg,keyData);
         }
-        protected override void OnPaint(PaintEventArgs e)
+        internal void PaintBackdrop(Graphics g)
         {
-            var g=e.Graphics;g.DrawImageUnscaled(screen,0,0);
-            using(var shade=new SolidBrush(Color.FromArgb(140,14,20,35)))
+            g.DrawImageUnscaled(screen,0,0);
+            using(var shade=new SolidBrush(Color.FromArgb(126,Glass.Background)))
             {
                 if(Selection.Width>0&&Selection.Height>0)
                 {var r=Selection;g.FillRectangle(shade,0,0,Width,r.Top);g.FillRectangle(shade,0,r.Bottom,Width,Height-r.Bottom);g.FillRectangle(shade,0,r.Top,r.Left,r.Height);g.FillRectangle(shade,r.Right,r.Top,Width-r.Right,r.Height);}
                 else g.FillRectangle(shade,ClientRectangle);
             }
+        }
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            var g=e.Graphics;PaintBackdrop(g);
             if(Selection.Width>0&&Selection.Height>0)
             {
-                var r=Selection;using(var p=new Pen(Color.White,1)){p.DashStyle=DashStyle.Dash;g.DrawRectangle(p,r.X,r.Y,r.Width-1,r.Height-1);}
-                foreach(var h in Handles()){g.FillRectangle(Brushes.White,h.X-3,h.Y-3,6,6);}
+                var r=Selection;g.SmoothingMode=SmoothingMode.AntiAlias;
+                using(var p=new Pen(Glass.Accent,1.5f))g.DrawRectangle(p,r.X,r.Y,r.Width-1,r.Height-1);
+                foreach(var h in Handles())
+                {
+                    using(var b=new SolidBrush(Glass.Accent))g.FillEllipse(b,h.X-4,h.Y-4,8,8);
+                    using(var p=new Pen(Color.White,1.5f))g.DrawEllipse(p,h.X-4,h.Y-4,8,8);
+                }
                 string size=r.Width+" × "+r.Height+" px";var sz=g.MeasureString(size,labelFont);
-                int y=r.Top>30?r.Top-29:r.Top+8;
-                using(var br=new SolidBrush(Color.FromArgb(235,25,31,48)))g.FillRectangle(br,r.Left,y,sz.Width+18,25);
-                g.DrawString(size,labelFont,Brushes.White,r.Left+9,y+3);
+                int y=r.Top>38?r.Top-36:r.Top+9;int x=Math.Min(Math.Max(8,r.Left),Math.Max(8,ClientSize.Width-(int)sz.Width-28));
+                Glass.PaintCard(g,new Rectangle(x,y,(int)Math.Ceiling(sz.Width)+22,28),Glass.Surface,9);
+                using(var br=new SolidBrush(Glass.Text))g.DrawString(size,labelFont,br,x+11,y+5);
             }
             else
             {
                 var monitor=Screen.FromPoint(System.Windows.Forms.Cursor.Position).Bounds;monitor.Offset(-desktop.X,-desktop.Y);
-                var box=new Rectangle(monitor.Left+Math.Max(12,(monitor.Width-600)/2),monitor.Top+48,Math.Min(600,monitor.Width-24),80);
-                using(var b=new SolidBrush(Color.FromArgb(235,25,31,48)))g.FillRectangle(b,box);
-                g.DrawString("Выделите область мышью",titleFont,Brushes.White,box.Left+20,box.Top+12);
-                g.DrawString("Shift — квадрат  ·  Ctrl+A — весь рабочий стол  ·  Esc — отмена",labelFont,Brushes.White,box.Left+20,box.Top+45);
+                var box=new Rectangle(monitor.Left+Math.Max(12,(monitor.Width-572)/2),monitor.Top+48,Math.Min(572,monitor.Width-24),84);
+                Glass.PaintCard(g,box,Glass.Surface,18);
+                using(var br=new SolidBrush(Glass.Text))g.DrawString("Выделите область мышью",titleFont,br,box.Left+22,box.Top+15);
+                using(var br=new SolidBrush(Glass.Muted))g.DrawString("Shift — квадрат  ·  Ctrl+A — весь экран  ·  Esc — отмена",labelFont,br,box.Left+22,box.Top+49);
             }
             if(magnifier && (!actions.Visible||dragging))PaintMagnifier(g);
             base.OnPaint(e);
@@ -161,13 +188,13 @@ namespace SnapLite
             int x=mouse.X+28,y=mouse.Y+28;const int side=119;
             if(x+side>monitor.Right-8)x=mouse.X-side-28;if(y+side+24>monitor.Bottom-8)y=mouse.Y-side-48;
             x=Math.Max(monitor.Left+4,x);y=Math.Max(monitor.Top+4,y);
+            Glass.PaintCard(g,new Rectangle(x-6,y-6,side+12,side+38),Glass.Surface,12);
             var old=g.InterpolationMode;g.InterpolationMode=InterpolationMode.NearestNeighbor;g.PixelOffsetMode=PixelOffsetMode.Half;
-            g.FillRectangle(Brushes.Black,x-2,y-2,side+4,side+28);
             g.DrawImage(screen,new Rectangle(x,y,side,side),new Rectangle(mouse.X-8,mouse.Y-8,17,17),GraphicsUnit.Pixel);
             g.InterpolationMode=old;g.PixelOffsetMode=PixelOffsetMode.Default;
-            using(var p=new Pen(Theme.Accent,1)){g.DrawLine(p,x+side/2,y,x+side/2,y+side);g.DrawLine(p,x,y+side/2,x+side,y+side/2);}
-            g.DrawString("X "+(mouse.X+desktop.X)+"  Y "+(mouse.Y+desktop.Y),labelFont,Brushes.White,x+3,y+side+3);
+            using(var p=new Pen(Glass.Accent,1)){g.DrawLine(p,x+side/2,y,x+side/2,y+side);g.DrawLine(p,x,y+side/2,x+side,y+side/2);}
+            using(var br=new SolidBrush(Glass.Text))g.DrawString("X "+(mouse.X+desktop.X)+"  Y "+(mouse.Y+desktop.Y),labelFont,br,x+3,y+side+5);
         }
-        protected override void Dispose(bool disposing){if(disposing){labelFont.Dispose();titleFont.Dispose();}base.Dispose(disposing);}
+        protected override void Dispose(bool disposing){if(disposing){labelFont.Dispose();titleFont.Dispose();tip.Dispose();}base.Dispose(disposing);}
     }
 }

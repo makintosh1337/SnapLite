@@ -59,71 +59,205 @@ namespace SnapLite
     {
         public static string Ask(IWin32Window owner)
         {
-            using(var f=new Form {Text="Текст на скриншоте",ClientSize=new Size(430,190),FormBorderStyle=FormBorderStyle.FixedDialog,StartPosition=FormStartPosition.CenterParent,MinimizeBox=false,MaximizeBox=false,Font=new Font("Segoe UI",10)})
+            using(var f=new GlassForm {Text="Текст на скриншоте",ClientSize=new Size(400,202),FormBorderStyle=FormBorderStyle.FixedDialog,StartPosition=FormStartPosition.CenterParent,MinimizeBox=false,MaximizeBox=false})
             {
-                var box=new TextBox {Multiline=true,Bounds=new Rectangle(16,16,398,110)};f.Controls.Add(box);
-                var ok=Theme.Button("Добавить",112,true);ok.Location=new Point(302,140);ok.DialogResult=DialogResult.OK;f.Controls.Add(ok);
-                var cancel=Theme.Button("Отмена",100,false);cancel.Location=new Point(190,140);cancel.DialogResult=DialogResult.Cancel;f.Controls.Add(cancel);f.AcceptButton=ok;f.CancelButton=cancel;
+                var title=new Label {Text="Добавить подпись",AutoSize=true,ForeColor=Glass.Text,Font=new Font("Segoe UI",12,FontStyle.Bold),Location=new Point(18,16),BackColor=Color.Transparent};f.Controls.Add(title);
+                var field=new GlassPanel {Bounds=new Rectangle(18,48,364,90),Padding=new Padding(12)};
+                var box=new TextBox {Multiline=true,AcceptsReturn=true,Dock=DockStyle.Fill,BorderStyle=BorderStyle.None,BackColor=Glass.Surface,ForeColor=Glass.Text,Font=Glass.UiFont};field.Controls.Add(box);f.Controls.Add(field);
+                var ok=new GlassButton {Text="Добавить",Width=112,Primary=true,Bounds=new Rectangle(270,153,112,34),DialogResult=DialogResult.OK};f.Controls.Add(ok);
+                var cancel=new GlassButton {Text="Отмена",Bounds=new Rectangle(164,153,98,34),DialogResult=DialogResult.Cancel};f.Controls.Add(cancel);f.AcceptButton=ok;f.CancelButton=cancel;
+                f.Shown+=delegate{box.Focus();};
                 return f.ShowDialog(owner)==DialogResult.OK?box.Text:null;
             }
         }
     }
-    public sealed class EditorForm : Form
+
+    // An inexpensive static surface: there is no animation or idle rendering timer.
+    internal sealed class EditorViewport : Panel
+    {
+        public EditorViewport(){DoubleBuffered=true;SetStyle(ControlStyles.ResizeRedraw,true);}
+        protected override void OnPaintBackground(PaintEventArgs e)
+        {
+            e.Graphics.Clear(Glass.Mix(Glass.Background,Color.Black,.12f));
+            using(var p=new Pen(Color.FromArgb(13,Glass.Text)))
+                for(int x=0;x<Width;x+=24)for(int y=0;y<Height;y+=24)e.Graphics.DrawRectangle(p,x,y,1,1);
+        }
+    }
+
+    internal sealed class InkButton : Control
+    {
+        private Color ink;
+        private bool hover;
+        public Color Ink {get{return ink;}set{ink=value;Invalidate();}}
+        public InkButton(){SetStyle(ControlStyles.SupportsTransparentBackColor|ControlStyles.Selectable,true);Size=new Size(38,38);Cursor=Cursors.Hand;TabStop=true;DoubleBuffered=true;BackColor=Color.Transparent;}
+        protected override void OnMouseEnter(EventArgs e){hover=true;Invalidate();base.OnMouseEnter(e);}
+        protected override void OnMouseLeave(EventArgs e){hover=false;Invalidate();base.OnMouseLeave(e);}
+        protected override void OnKeyDown(KeyEventArgs e){if(e.KeyCode==Keys.Space||e.KeyCode==Keys.Enter){OnClick(EventArgs.Empty);e.Handled=true;}base.OnKeyDown(e);}
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Glass.PaintCard(e.Graphics,ClientRectangle,hover?Glass.Mix(Glass.Surface,Glass.Text,.10f):Glass.Surface,Math.Min(Glass.Radius,10));
+            e.Graphics.SmoothingMode=SmoothingMode.AntiAlias;
+            int x=(Width-16)/2,y=(Height-16)/2;
+            using(var b=new SolidBrush(ink))e.Graphics.FillEllipse(b,x,y,16,16);
+            using(var p=new Pen(Color.FromArgb(130,Glass.Text),Focused?2:1))e.Graphics.DrawEllipse(p,x-2,y-2,20,20);
+            base.OnPaint(e);
+        }
+    }
+
+    public sealed class EditorForm : GlassForm
     {
         private readonly Document document;
-        private readonly Settings settings;
+        private Settings settings;
         private readonly Action<string> notify;
         private readonly DrawingCanvas canvas;
         private readonly Panel viewport;
-        private readonly NumericUpDown outputScale;
-        private readonly ToolStripStatusLabel status;
-        private readonly ToolStripComboBox zoom;
-        private bool fit=true;
-        private readonly ToolTip tip=new ToolTip();
+        private readonly GlassNumber outputScale;
+        private readonly Label status;
+        private readonly GlassCombo zoom;
+        private readonly GlassPanel toolsHost;
+        private readonly FlowLayoutPanel tools;
+        private readonly FlowLayoutPanel actions,scaleGroup;
+        private bool verticalTools;
+        private bool fit=true, arrangingTools;
+        private readonly ToolTip tip=new ToolTip {AutoPopDelay=7000,InitialDelay=450,ReshowDelay=100};
+
         public EditorForm(Bitmap image,Settings settings,Action<string> notify)
         {
             document=new Document(image);this.settings=settings;this.notify=notify;
-            Text="SnapLite — редактор";Icon=Theme.Icon();Font=new Font("Segoe UI",10);BackColor=Theme.Background;
-            AutoScaleMode=AutoScaleMode.Dpi;StartPosition=FormStartPosition.CenterScreen;MinimumSize=new Size(830,480);
+            Text="SnapLite — редактор";Icon=Theme.Icon();
+            AutoScaleMode=AutoScaleMode.Dpi;StartPosition=FormStartPosition.CenterScreen;MinimumSize=new Size(780,480);
             var area=Screen.FromPoint(Cursor.Position).WorkingArea;
             Size=new Size(Math.Min(area.Width-40,1120),Math.Min(area.Height-40,790));KeyPreview=true;
-            var layout=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=1,RowCount=4,Margin=Padding.Empty};
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute,46));layout.RowStyles.Add(new RowStyle(SizeType.Percent,100));layout.RowStyles.Add(new RowStyle(SizeType.Absolute,57));layout.RowStyles.Add(new RowStyle(SizeType.Absolute,26));Controls.Add(layout);
-            var tools=new ToolStrip {Dock=DockStyle.Fill,GripStyle=ToolStripGripStyle.Hidden,BackColor=Color.White,Padding=new Padding(8,4,8,4),RenderMode=ToolStripRenderMode.System};layout.Controls.Add(tools,0,0);
+            var layout=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=1,RowCount=4,Margin=Padding.Empty,Padding=new Padding(14,0,14,8),BackColor=Color.Transparent};
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute,62));layout.RowStyles.Add(new RowStyle(SizeType.Percent,100));layout.RowStyles.Add(new RowStyle(SizeType.Absolute,64));layout.RowStyles.Add(new RowStyle(SizeType.Absolute,25));Controls.Add(layout);
+            var header=new Panel {Dock=DockStyle.Fill,Margin=Padding.Empty,BackColor=Color.Transparent};layout.Controls.Add(header,0,0);
+            var title=new Label {Text="Редактор",Font=new Font("Segoe UI Semibold",17,FontStyle.Bold),ForeColor=Glass.Text,BackColor=Color.Transparent,AutoSize=true,Location=new Point(0,12)};header.Controls.Add(title);
+            var subtitle=new Label {Text="SNAPLITE  /  "+image.Width+" × "+image.Height,Font=new Font("Segoe UI",9),ForeColor=Glass.Muted,Tag="muted",TextAlign=ContentAlignment.MiddleRight,Dock=DockStyle.Right,Width=270,BackColor=Color.Transparent};header.Controls.Add(subtitle);
+
+            var workspace=new Panel {Dock=DockStyle.Fill,Margin=Padding.Empty,BackColor=Color.Transparent};layout.Controls.Add(workspace,0,1);
             canvas=new DrawingCanvas(document){Ink=Color.FromArgb(settings.PenColor),PenWidth=settings.PenWidth};
-            string[] names={"Перо","Стрелка","Рамка","Маркер","Текст","Заливка"};
-            for(int i=0;i<names.Length;i++)
+            viewport=new EditorViewport {Dock=DockStyle.Fill,AutoScroll=true,Padding=new Padding(18)};viewport.Controls.Add(canvas);canvas.Location=new Point(18,18);workspace.Controls.Add(viewport);
+            verticalTools=settings.ToolbarPosition=="Left"||settings.ToolbarPosition=="Right";
+            toolsHost=new GlassPanel {Dock=settings.ToolbarPosition=="Bottom"?DockStyle.Bottom:(settings.ToolbarPosition=="Left"?DockStyle.Left:(settings.ToolbarPosition=="Right"?DockStyle.Right:DockStyle.Top)),Padding=new Padding(8),Margin=Padding.Empty,Height=60,Width=152};workspace.Controls.Add(toolsHost);viewport.BringToFront();
+            tools=new FlowLayoutPanel {Dock=DockStyle.Fill,FlowDirection=verticalTools?FlowDirection.TopDown:FlowDirection.LeftToRight,WrapContents=!verticalTools,AutoScroll=verticalTools,BackColor=Color.Transparent,Padding=Padding.Empty,Margin=Padding.Empty};toolsHost.Controls.Add(tools);
+            string[] names={"Перо","Стрелка","Рамка","Маркер","Текст","Заливка"};string[] glyphs={"✎","↗","□","▰","T","■"};
+            foreach(string toolName in settings.ToolOrder.Split(','))
             {
-                DrawTool tool=(DrawTool)i;var b=new ToolStripButton(names[i]){Tag=tool,Checked=i==0,DisplayStyle=ToolStripItemDisplayStyle.Text,ToolTipText=i==5?"Сплошная заливка выбранным цветом":names[i]};
-                b.Click+=delegate(object s,EventArgs e){foreach(ToolStripItem it in tools.Items)if(it is ToolStripButton && it.Tag is DrawTool)((ToolStripButton)it).Checked=it==s;canvas.Tool=tool;};tools.Items.Add(b);
+                DrawTool tool=(DrawTool)Enum.Parse(typeof(DrawTool),toolName);int i=(int)tool;var b=new GlassButton {Text=settings.ShowToolLabels?names[i]:"",Glyph=glyphs[i],Tag=tool,Selected=tool==DrawTool.Pen,Size=new Size(verticalTools?106:(settings.ShowToolLabels?100:38),38),Margin=new Padding(2,2,4,2),Font=new Font("Segoe UI",9)};
+                tip.SetToolTip(b,i==5?"Заливка: закройте фрагмент выбранным цветом":names[i]);
+                b.Click+=delegate(object s,EventArgs e){foreach(Control item in tools.Controls){var button=item as GlassButton;if(button!=null&&button.Tag is DrawTool)button.Selected=button==s;}canvas.Tool=tool;canvas.Focus();};tools.Controls.Add(b);
             }
-            tools.Items.Add(new ToolStripSeparator());
-            var color=new ToolStripButton("Цвет") {BackColor=canvas.Ink,ToolTipText="Выбрать цвет"};color.Click+=delegate{using(var d=new ColorDialog {Color=canvas.Ink,FullOpen=true})if(d.ShowDialog(this)==DialogResult.OK){canvas.Ink=d.Color;color.BackColor=d.Color;}};tools.Items.Add(color);
-            var width=new ToolStripComboBox {DropDownStyle=ComboBoxStyle.DropDownList,AutoSize=false,Width=48,ToolTipText="Толщина пера в пикселях"};foreach(int w in new[]{1,2,3,5,8,12,16,20})width.Items.Add(w.ToString());width.SelectedItem=settings.PenWidth.ToString();if(width.SelectedIndex<0)width.SelectedIndex=2;width.SelectedIndexChanged+=delegate{canvas.PenWidth=int.Parse(width.Text);};tools.Items.Add(width);
-            tools.Items.Add(new ToolStripSeparator());var undo=new ToolStripButton("↶") {ToolTipText="Отменить (Ctrl+Z)"};undo.Click+=delegate{document.Undo();canvas.Invalidate();};tools.Items.Add(undo);
-            var redo=new ToolStripButton("↷") {ToolTipText="Вернуть (Ctrl+Y)"};redo.Click+=delegate{document.Redo();canvas.Invalidate();};tools.Items.Add(redo);
-            tools.Items.Add(new ToolStripSeparator());
-            zoom=new ToolStripComboBox {AutoSize=false,Width=100,DropDownStyle=ComboBoxStyle.DropDownList,ToolTipText="Масштаб просмотра, не влияет на файл"};zoom.Items.AddRange(new object[]{"По окну","25%","50%","75%","100%","150%","200%","400%"});zoom.SelectedIndex=0;zoom.SelectedIndexChanged+=delegate{fit=zoom.SelectedIndex==0;UpdateZoom();};tools.Items.Add(zoom);
-            viewport=new Panel{Dock=DockStyle.Fill,AutoScroll=true,BackColor=Color.FromArgb(222,227,237),Padding=new Padding(16)};viewport.Controls.Add(canvas);canvas.Location=new Point(16,16);layout.Controls.Add(viewport,0,1);viewport.Resize+=delegate{if(fit)UpdateZoom();};
-            var footer=new FlowLayoutPanel{Dock=DockStyle.Fill,Padding=new Padding(8,7,8,4),BackColor=Color.White,WrapContents=false};layout.Controls.Add(footer,0,2);
-            footer.Controls.Add(new Label{Text="В файл:",AutoSize=true,Margin=new Padding(4,10,0,0)});
-            outputScale=new NumericUpDown{Minimum=10,Maximum=400,Increment=10,Value=settings.OutputScale,Width=65,Margin=new Padding(4,7,0,0)};footer.Controls.Add(outputScale);footer.Controls.Add(new Label{Text="%",AutoSize=true,Margin=new Padding(1,10,14,0)});tip.SetToolTip(outputScale,"Масштаб изображения при копировании и сохранении");
-            var copy=Theme.Button("Копировать",122,true);copy.Click+=delegate{CopyImage();};tip.SetToolTip(copy,"Ctrl+C");footer.Controls.Add(copy);
-            var save=Theme.Button("Сохранить как…",154,false);save.Click+=delegate{SaveImage(true);};tip.SetToolTip(save,"Ctrl+S");footer.Controls.Add(save);
-            var quick=Theme.Button("В папку",104,false);quick.Click+=delegate{SaveImage(false);};tip.SetToolTip(quick,"Быстрое сохранение в папку из настроек (Ctrl+Shift+S)");footer.Controls.Add(quick);
-            var strip=new StatusStrip{Dock=DockStyle.Fill,BackColor=Theme.Background,SizingGrip=false};status=new ToolStripStatusLabel();strip.Items.Add(status);layout.Controls.Add(strip,0,3);
-            outputScale.ValueChanged+=delegate{UpdateStatus();};Shown+=delegate{UpdateZoom();UpdateStatus();canvas.Focus();};
+            var color=new InkButton {Ink=canvas.Ink,Margin=new Padding(6,2,4,2)};tip.SetToolTip(color,"Цвет пера, стрелок, текста и заливки");color.Click+=delegate{using(var d=new ColorDialog {Color=canvas.Ink,FullOpen=true})if(d.ShowDialog(this)==DialogResult.OK){canvas.Ink=d.Color;color.Ink=d.Color;}};tools.Controls.Add(color);
+            var width=new GlassCombo {Tag="PenWidth",DropDownStyle=ComboBoxStyle.DropDownList,Width=verticalTools?106:76,Margin=new Padding(2,6,6,2)};foreach(int w in new[]{1,2,3,5,8,12,16,20})width.Items.Add(w+" px");width.SelectedItem=settings.PenWidth+" px";if(width.SelectedIndex<0)width.SelectedIndex=2;width.SelectedIndexChanged+=delegate{canvas.PenWidth=int.Parse(width.Text.Split(' ')[0]);};tip.SetToolTip(width,"Толщина пера в пикселях");tools.Controls.Add(width);
+            var undo=new GlassButton {Glyph="↶",Size=new Size(verticalTools?50:36,38),Margin=new Padding(2,2,2,2)};undo.Click+=delegate{document.Undo();canvas.Invalidate();};tip.SetToolTip(undo,"Отменить (Ctrl+Z)");tools.Controls.Add(undo);
+            var redo=new GlassButton {Glyph="↷",Size=new Size(verticalTools?50:36,38),Margin=new Padding(2,2,6,2)};redo.Click+=delegate{document.Redo();canvas.Invalidate();};tip.SetToolTip(redo,"Вернуть (Ctrl+Y)");tools.Controls.Add(redo);
+            zoom=new GlassCombo {Width=106,DropDownStyle=ComboBoxStyle.DropDownList,Margin=new Padding(2,6,2,2)};zoom.Items.AddRange(new object[]{"По окну","25%","50%","75%","100%","150%","200%","400%"});zoom.SelectedIndex=0;zoom.SelectedIndexChanged+=delegate{fit=zoom.SelectedIndex==0;UpdateZoom();};tip.SetToolTip(zoom,"Масштаб просмотра; размер сохраняемого файла задаётся ниже");tools.Controls.Add(zoom);
+            if(verticalTools){color.Width=106;undo.Width=106;redo.Width=106;}
+            toolsHost.Resize+=delegate{ArrangeTools();};viewport.Resize+=delegate{if(fit)UpdateZoom();};
+
+            var footer=new Panel {Dock=DockStyle.Fill,BackColor=Color.Transparent,Margin=Padding.Empty,Padding=new Padding(0,12,0,0)};layout.Controls.Add(footer,0,2);
+            scaleGroup=new FlowLayoutPanel {Dock=settings.ActionPosition=="Left"?DockStyle.Right:DockStyle.Left,Width=180,WrapContents=false,BackColor=Color.Transparent,Padding=new Padding(0,3,0,0),Margin=Padding.Empty};footer.Controls.Add(scaleGroup);
+            scaleGroup.Controls.Add(new Label {Text="Вывод",AutoSize=true,ForeColor=Glass.Muted,Tag="muted",BackColor=Color.Transparent,Margin=new Padding(0,7,8,0)});
+            outputScale=new GlassNumber {Minimum=10,Maximum=400,Increment=10,Value=settings.OutputScale,Width=69,Margin=new Padding(0,3,3,0)};scaleGroup.Controls.Add(outputScale);scaleGroup.Controls.Add(new Label{Text="%",AutoSize=true,ForeColor=Glass.Muted,Tag="muted",BackColor=Color.Transparent,Margin=new Padding(0,7,0,0)});tip.SetToolTip(outputScale,"Размер изображения при копировании и сохранении (10–400%)");
+            actions=new FlowLayoutPanel {Dock=settings.ActionPosition=="Left"?DockStyle.Left:DockStyle.Right,AutoSize=true,AutoSizeMode=AutoSizeMode.GrowAndShrink,WrapContents=false,BackColor=Color.Transparent,Margin=Padding.Empty};footer.Controls.Add(actions);
+            foreach(string token in settings.ButtonOrder.Split(','))
+            {
+                GlassButton b;
+                if(token=="Copy"){b=new GlassButton {Text=settings.ShowToolLabels?"Копировать":"",Glyph="▣",Primary=true,Size=new Size(settings.ShowToolLabels?142:44,40)};b.Click+=delegate{CopyImage();};tip.SetToolTip(b,"Копировать (Ctrl+C)");}
+                else if(token=="Save"){b=new GlassButton {Text=settings.ShowToolLabels?"Сохранить как":"",Glyph="↓",Size=new Size(settings.ShowToolLabels?158:44,40)};b.Click+=delegate{SaveImage(true);};tip.SetToolTip(b,"Сохранить как… (Ctrl+S)");}
+                else if(token=="QuickSave"){b=new GlassButton {Text=settings.ShowToolLabels?"В папку":"",Glyph="↧",Size=new Size(settings.ShowToolLabels?118:44,40)};b.Click+=delegate{SaveImage(false);};tip.SetToolTip(b,"Быстро сохранить в папку из настроек (Ctrl+Shift+S)");}
+                else continue;
+                b.Tag=token;b.Margin=new Padding(4,0,0,0);actions.Controls.Add(b);
+            }
+            status=new Label {Dock=DockStyle.Fill,ForeColor=Glass.Muted,Tag="muted",Font=new Font("Segoe UI",8.5f),BackColor=Color.Transparent,TextAlign=ContentAlignment.MiddleLeft,Margin=Padding.Empty,AutoEllipsis=true};layout.Controls.Add(status,0,3);
+            outputScale.ValueChanged+=delegate{UpdateStatus();};Shown+=delegate{ArrangeTools();UpdateZoom();UpdateStatus();canvas.Focus();};
+        }
+
+        public void ApplyAppearance(Settings value)
+        {
+            if(value==null||IsDisposed)return;
+            settings=value;Glass.Configure(value);
+            Point scroll=viewport.AutoScrollPosition;
+            Control workspace=toolsHost.Parent,footer=actions.Parent;
+            SuspendLayout();workspace.SuspendLayout();footer.SuspendLayout();tools.SuspendLayout();actions.SuspendLayout();arrangingTools=true;
+            try
+            {
+                verticalTools=value.ToolbarPosition=="Left"||value.ToolbarPosition=="Right";
+                toolsHost.Dock=DockStyle.None;
+                tools.AutoScroll=false;tools.AutoScrollPosition=Point.Empty;
+                tools.FlowDirection=verticalTools?FlowDirection.TopDown:FlowDirection.LeftToRight;
+                tools.WrapContents=!verticalTools;
+                string[] names={"Перо","Стрелка","Рамка","Маркер","Текст","Заливка"};
+                foreach(Control item in tools.Controls)
+                {
+                    var button=item as GlassButton;
+                    if(button!=null&&button.Tag is DrawTool)
+                    {
+                        button.Text=value.ShowToolLabels?names[(int)(DrawTool)button.Tag]:"";
+                        button.Width=verticalTools?106:(value.ShowToolLabels?100:38);
+                        button.Selected=(DrawTool)button.Tag==canvas.Tool;
+                    }
+                    else if(item is InkButton){item.Width=verticalTools?106:38;((InkButton)item).Ink=canvas.Ink;}
+                    else if(button!=null)item.Width=verticalTools?106:36;
+                    else if(Convert.ToString(item.Tag)=="PenWidth"){item.Width=verticalTools?106:76;((ComboBox)item).SelectedItem=canvas.PenWidth+" px";}
+                }
+                int index=0;
+                foreach(string name in value.ToolOrder.Split(','))
+                {
+                    DrawTool desired=(DrawTool)Enum.Parse(typeof(DrawTool),name);
+                    Control found=null;foreach(Control item in tools.Controls)if(item.Tag is DrawTool&&(DrawTool)item.Tag==desired){found=item;break;}
+                    if(found!=null)tools.Controls.SetChildIndex(found,index++);
+                }
+                toolsHost.Width=152;toolsHost.Height=58;
+                toolsHost.Dock=value.ToolbarPosition=="Bottom"?DockStyle.Bottom:(value.ToolbarPosition=="Left"?DockStyle.Left:(value.ToolbarPosition=="Right"?DockStyle.Right:DockStyle.Top));
+                tools.AutoScroll=verticalTools;viewport.BringToFront();
+                foreach(Control item in actions.Controls)
+                {
+                    var button=(GlassButton)item;string token=(string)button.Tag;
+                    string text=token=="Copy"?"Копировать":(token=="Save"?"Сохранить как":"В папку");
+                    button.Text=value.ShowToolLabels?text:"";
+                    button.Width=value.ShowToolLabels?(token=="Copy"?142:(token=="Save"?158:118)):44;
+                }
+                index=0;
+                foreach(string token in value.ButtonOrder.Split(','))
+                {
+                    Control found=null;foreach(Control item in actions.Controls)if((string)item.Tag==token){found=item;break;}
+                    if(found!=null)actions.Controls.SetChildIndex(found,index++);
+                }
+                actions.Dock=value.ActionPosition=="Left"?DockStyle.Left:DockStyle.Right;
+                scaleGroup.Dock=value.ActionPosition=="Left"?DockStyle.Right:DockStyle.Left;
+                Glass.Apply(this);
+            }
+            finally
+            {
+                actions.ResumeLayout(true);tools.ResumeLayout(true);footer.ResumeLayout(true);workspace.ResumeLayout(true);ResumeLayout(true);arrangingTools=false;
+            }
+            ArrangeTools();UpdateZoom();
+            if(!fit)viewport.AutoScrollPosition=new Point(-scroll.X,-scroll.Y);
+            UpdateStatus();Invalidate(true);
+        }
+
+        private void ArrangeTools()
+        {
+            if(arrangingTools||verticalTools||tools==null)return;arrangingTools=true;
+            try
+            {
+                int available=Math.Max(100,toolsHost.ClientSize.Width-toolsHost.Padding.Horizontal),used=0,rows=1;
+                foreach(Control item in tools.Controls){int width=item.Width+item.Margin.Horizontal;if(used>0&&used+width>available){rows++;used=0;}used+=width;}
+                toolsHost.Height=16+rows*42;
+            }
+            finally{arrangingTools=false;}
         }
         private void UpdateZoom()
         {
             if(viewport==null)return;
-            float z=fit?Math.Min(1,Math.Min(Math.Max(1,viewport.ClientSize.Width-38)/(float)document.Image.Width,Math.Max(1,viewport.ClientSize.Height-38)/(float)document.Image.Height)):float.Parse(zoom.Text.TrimEnd('%'),CultureInfo.InvariantCulture)/100;
+            float z=fit?Math.Min(1,Math.Min(Math.Max(1,viewport.ClientSize.Width-42)/(float)document.Image.Width,Math.Max(1,viewport.ClientSize.Height-42)/(float)document.Image.Height)):float.Parse(zoom.Text.TrimEnd('%'),CultureInfo.InvariantCulture)/100;
             canvas.SetZoom(z);if(fit)viewport.AutoScrollPosition=Point.Empty;UpdateStatus();
         }
         private void UpdateStatus()
         {
             if(status==null)return;int scale=(int)outputScale.Value;
-            status.Text="  "+document.Image.Width+" × "+document.Image.Height+" px   •   Вывод: "+Math.Max(1,(int)Math.Round(document.Image.Width*scale/100.0))+" × "+Math.Max(1,(int)Math.Round(document.Image.Height*scale/100.0))+" px   •   Просмотр: "+Math.Round(canvas.Zoom*100)+"%   •   Ctrl+Z — отмена";
+            status.Text=document.Image.Width+" × "+document.Image.Height+" px   ·   Вывод "+Math.Max(1,(int)Math.Round(document.Image.Width*scale/100.0))+" × "+Math.Max(1,(int)Math.Round(document.Image.Height*scale/100.0))+" px   ·   Просмотр "+Math.Round(canvas.Zoom*100)+"%   ·   Ctrl+Z — отмена";
         }
         private void CopyImage()
         {

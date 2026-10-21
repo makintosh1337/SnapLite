@@ -12,6 +12,60 @@ namespace SnapLite
     {
         private static int count;
         private static void Check(bool condition,string name){if(!condition)throw new Exception("FAIL: "+name);count++;}
+        private static Settings ReadSettings(string path)
+        {
+            using(var stream=File.OpenRead(path))return (Settings)new XmlSerializer(typeof(Settings)).Deserialize(stream);
+        }
+        private static void CheckAppearance(string dir)
+        {
+            var defaults=new Settings();defaults.Normalize();
+            Check(defaults.ThemePreset=="Midnight"&&defaults.GlassOpacity==82&&defaults.CornerRadius==16,"appearance defaults");
+            Check(defaults.ToolbarPosition=="Top"&&defaults.ActionPosition=="Right"&&defaults.SelectionToolbarPosition=="Below"&&defaults.ButtonOrder=="Copy,Save,QuickSave"&&defaults.ToolOrder=="Pen,Arrow,Rectangle,Marker,Text,Cover","layout defaults");
+
+            var bounds=new Settings {GlassOpacity=-1,CornerRadius=-1};bounds.Normalize();
+            Check(bounds.GlassOpacity==30&&bounds.CornerRadius==0,"appearance minimum bounds");
+            bounds.GlassOpacity=101;bounds.CornerRadius=100;bounds.Normalize();
+            Check(bounds.GlassOpacity==100&&bounds.CornerRadius==28,"appearance maximum bounds");
+            bounds.ToolbarPosition="Diagonal";bounds.ActionPosition=null;bounds.SelectionToolbarPosition="";bounds.Normalize();
+            Check(bounds.ToolbarPosition=="Top"&&bounds.ActionPosition=="Right"&&bounds.SelectionToolbarPosition=="Below","invalid positions recover to visible defaults");
+            bounds.BackgroundColor=Color.FromArgb(0,18,31,47).ToArgb();bounds.PanelColor=Color.FromArgb(1,35,50,67).ToArgb();bounds.TextColor=Color.FromArgb(90,239,242,250).ToArgb();bounds.AccentColor=Color.FromArgb(220,65,216,175).ToArgb();bounds.Normalize();
+            Check(bounds.BackgroundColor==Color.FromArgb(18,31,47).ToArgb()&&bounds.PanelColor==Color.FromArgb(35,50,67).ToArgb()&&bounds.TextColor==Color.FromArgb(239,242,250).ToArgb()&&bounds.AccentColor==Color.FromArgb(65,216,175).ToArgb(),"palette alpha cannot make controls unreadable");
+            bounds.MenuColor=Color.FromArgb(0,20,30,40).ToArgb();bounds.ButtonColor=Color.FromArgb(1,40,50,60).ToArgb();bounds.BorderColor=Color.FromArgb(90,110,120,130).ToArgb();bounds.Accent2Color=Color.FromArgb(220,70,80,190).ToArgb();bounds.Normalize();
+            Check(bounds.MenuColor==Color.FromArgb(20,30,40).ToArgb()&&bounds.ButtonColor==Color.FromArgb(40,50,60).ToArgb()&&bounds.BorderColor==Color.FromArgb(110,120,130).ToArgb()&&bounds.Accent2Color==Color.FromArgb(70,80,190).ToArgb(),"menu and button palette alpha is normalized separately from glass opacity");
+            bool safeOrder=true;
+            foreach(string order in new string[]{null,"","Copy,Copy,Save","Copy,Save","Copy,Save,Other","Copy,Save,QuickSave,Save"})
+            {
+                bounds.ButtonOrder=order;bounds.Normalize();safeOrder&=bounds.ButtonOrder=="Copy,Save,QuickSave";
+            }
+            Check(safeOrder,"invalid button orders cannot hide or duplicate actions");
+            bool safeTools=true;
+            foreach(string order in new string[]{null,"","Pen,Arrow,Rectangle,Marker,Text,Text","Pen,Arrow,Rectangle,Marker,Text","Pen,Arrow,Rectangle,Marker,Text,Other","Pen,Arrow,Rectangle,Marker,Text,Cover,Pen"})
+            {
+                bounds.ToolOrder=order;bounds.Normalize();safeTools&=bounds.ToolOrder=="Pen,Arrow,Rectangle,Marker,Text,Cover";
+            }
+            Check(safeTools,"invalid tool orders cannot hide or duplicate drawing tools");
+
+            // A pre-appearance profile must retain its capture preferences and gain safe visual defaults.
+            string legacy=Path.Combine(dir,"legacy-settings.xml");
+            File.WriteAllText(legacy,"<?xml version=\"1.0\"?><Settings><Hotkey>83</Hotkey><Modifiers>6</Modifiers><Magnifier>false</Magnifier><IncludeCursor>true</IncludeCursor><DelaySeconds>3</DelaySeconds><CaptureAction>Save</CaptureAction><OutputScale>150</OutputScale><Format>JPG</Format><JpegQuality>87</JpegQuality><CloseAfterAction>false</CloseAfterAction></Settings>",Encoding.UTF8);
+            var migrated=ReadSettings(legacy);migrated.Normalize();
+            Check(migrated.ThemePreset=="Midnight"&&migrated.GlassOpacity==82&&migrated.CornerRadius==16&&migrated.ButtonOrder=="Copy,Save,QuickSave"&&migrated.ToolOrder=="Pen,Arrow,Rectangle,Marker,Text,Cover","old profile gains appearance defaults");
+            Check(migrated.Hotkey==(int)Keys.S&&migrated.Modifiers==6&&!migrated.Magnifier&&migrated.IncludeCursor&&migrated.DelaySeconds==3&&migrated.CaptureAction=="Save"&&migrated.OutputScale==150&&migrated.Format=="JPG"&&migrated.JpegQuality==87&&!migrated.CloseAfterAction,"appearance migration preserves capture preferences");
+
+            var draft=defaults.Clone();draft.AccentColor=Color.Orange.ToArgb();draft.ButtonOrder="QuickSave,Copy,Save";draft.GlassOpacity=45;
+            Check(defaults.AccentColor!=draft.AccentColor&&defaults.ButtonOrder=="Copy,Save,QuickSave"&&defaults.GlassOpacity==82,"cancelled appearance draft leaves saved settings unchanged");
+
+            var custom=migrated.Clone();custom.SaveFolder=dir;
+            custom.BackgroundColor=Color.FromArgb(255,18,31,47).ToArgb();custom.PanelColor=Color.FromArgb(255,35,50,67).ToArgb();
+            custom.TextColor=Color.FromArgb(255,239,242,250).ToArgb();custom.AccentColor=Color.FromArgb(255,65,216,175).ToArgb();
+            custom.MenuColor=Color.FromArgb(255,20,30,40).ToArgb();custom.ButtonColor=Color.FromArgb(255,40,50,60).ToArgb();custom.BorderColor=Color.FromArgb(255,110,120,130).ToArgb();custom.Accent2Color=Color.FromArgb(255,70,80,190).ToArgb();
+            custom.GlassOpacity=61;custom.CornerRadius=23;custom.ToolbarPosition="Left";custom.ActionPosition="Left";custom.SelectionToolbarPosition="Above";custom.ButtonOrder="QuickSave,Copy,Save";custom.ToolOrder="Cover,Text,Marker,Rectangle,Arrow,Pen";custom.ShowToolLabels=false;
+            string path=Path.Combine(dir,"appearance-settings.xml");custom.Save(path);var restored=ReadSettings(path);restored.Normalize();
+            Check(restored.BackgroundColor==custom.BackgroundColor&&restored.PanelColor==custom.PanelColor&&restored.TextColor==custom.TextColor&&restored.AccentColor==custom.AccentColor&&restored.GlassOpacity==61&&restored.CornerRadius==23,"custom colors and glass appearance survive restart");
+            Check(restored.MenuColor==custom.MenuColor&&restored.ButtonColor==custom.ButtonColor&&restored.BorderColor==custom.BorderColor&&restored.Accent2Color==custom.Accent2Color,"custom menu, button and border colors survive restart");
+            Check(restored.ToolbarPosition=="Left"&&restored.ActionPosition=="Left"&&restored.SelectionToolbarPosition=="Above"&&restored.ButtonOrder=="QuickSave,Copy,Save"&&restored.ToolOrder=="Cover,Text,Marker,Rectangle,Arrow,Pen"&&!restored.ShowToolLabels,"custom button arrangement survives restart");
+            Check(restored.Hotkey==custom.Hotkey&&restored.Modifiers==custom.Modifiers&&restored.IncludeCursor==custom.IncludeCursor&&restored.Magnifier==custom.Magnifier&&restored.DelaySeconds==custom.DelaySeconds&&restored.CaptureAction==custom.CaptureAction&&restored.OutputScale==custom.OutputScale&&restored.Format==custom.Format&&restored.JpegQuality==custom.JpegQuality&&restored.CloseAfterAction==custom.CloseAfterAction,"saving appearance preserves capture preferences");
+        }
         public static Bitmap MakeDemo()
         {
             var b=new Bitmap(900,480);
@@ -39,6 +93,7 @@ namespace SnapLite
                 Check(settings.OutputScale==400&&settings.DelaySeconds==0&&settings.JpegQuality==1&&settings.Format=="PNG"&&settings.CaptureAction=="Editor","settings bounds");
                 string xml=Path.Combine(dir,"settings.xml");settings.Save(xml);settings.OutputScale=50;settings.Save(xml);
                 using(var s=File.OpenRead(xml)){var loaded=(Settings)new XmlSerializer(typeof(Settings)).Deserialize(s);Check(loaded.OutputScale==50&&loaded.SaveFolder==dir,"settings round trip and atomic replacement");}
+                CheckAppearance(dir);
                 using(var source=new Bitmap(80,60))
                 {
                     using(var g=Graphics.FromImage(source))g.Clear(Color.White);
@@ -62,7 +117,7 @@ namespace SnapLite
                 using(var capture=Images.Capture(new Rectangle(SystemInformation.VirtualScreen.Location,new Size(16,16)),false))Check(capture.Size==new Size(16,16),"real desktop capture");
                 using(var capture=Images.Capture(new Rectangle(SystemInformation.VirtualScreen.Location,new Size(16,16)),true))Check(capture.Size==new Size(16,16),"real desktop capture with cursor");
                 log.AppendLine("PASS: "+count+" checks");
-                log.AppendLine("Selection geometry, settings persistence, hotkeys, dimensions, PNG/JPG, annotations, undo/redo, real GDI capture.");
+                log.AppendLine("Selection geometry, settings persistence and appearance migration, hotkeys, dimensions, PNG/JPG, annotations, undo/redo, real GDI capture.");
             }
             catch(Exception ex){log.AppendLine(ex.ToString());Environment.ExitCode=1;}
             File.WriteAllText(reportPath,log.ToString(),Encoding.UTF8);
